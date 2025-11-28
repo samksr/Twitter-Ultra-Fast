@@ -1,6 +1,9 @@
 const axios = require('axios');
 const Parser = require('rss-parser');
 const Logger = require('./logger');
+const axios = require('axios');
+const Parser = require('rss-parser');
+const Logger = require('./logger');
 const SmartCache = require('./cache');
 
 const NITTER_INSTANCES = [
@@ -27,10 +30,10 @@ const USER_AGENTS = [
 class Fetcher {
   constructor() {
     this.axios = axios.create({
-      timeout: 8000,
+      timeout: 5000,
       headers: { 'User-Agent': this.getRandomAgent() }
     });
-    this.parser = new Parser({ timeout: 8000 });
+    this.parser = new Parser();
     this.logger = Logger.getInstance();
     this.cache = SmartCache.getInstance();
   }
@@ -50,7 +53,7 @@ class Fetcher {
     return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
   }
 
-  async fetchWithRetry(url, maxRetries = 3) {
+  async fetchWithRetry(url, maxRetries = 2) {
     for (let i = 0; i < maxRetries; i++) {
       try {
         const res = await this.axios.get(url, {
@@ -59,7 +62,7 @@ class Fetcher {
         return res.data;
       } catch (error) {
         if (i === maxRetries - 1) throw error;
-        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i)));
+        await new Promise(r => setTimeout(r, 500 * Math.pow(2, i)));
       }
     }
   }
@@ -91,6 +94,20 @@ class Fetcher {
     return null;
   }
 
+  async fetchNitterSafe(url) {
+    try {
+      const response = await Promise.race([
+        this.parser.parseURL(url),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Nitter timeout')), 4000)
+        )
+      ]);
+      return response;
+    } catch (e) {
+      throw e;
+    }
+  }
+
   async fetchNitter(username) {
     const shuffled = [...NITTER_INSTANCES]
       .sort(() => 0.5 - Math.random())
@@ -98,25 +115,28 @@ class Fetcher {
 
     for (const instance of shuffled) {
       try {
-        const feed = await this.parser.parseURL(`${instance}/${username}/rss?t=${Date.now()}`, {
-          headers: { 'User-Agent': this.getRandomAgent() }
-        });
-        if (feed.items?.length) {
+        const url = `${instance}/${username}/rss?t=${Date.now()}`;
+        const feed = await this.fetchNitterSafe(url);
+        
+        if (feed?.items?.length) {
           const items = feed.items
             .map(t => {
-              const match = t.link.match(/\/status\/(\d+)/);
+              const match = t.link?.match(/\/status\/(\d+)/) || t.id?.match(/(\d+)$/);
               return {
                 id: match?.[1],
                 text: t.contentSnippet || t.title || '',
                 createdAt: new Date(t.pubDate).getTime(),
                 media: [],
-                source: `Nitter (${new URL(instance).hostname})`
+                source: `Nitter`
               };
             })
             .filter(t => t.id);
-          const result = { source: items[0]?.source || 'Nitter', items };
-          this.cache.set(`nitter_${username}`, result);
-          return result;
+          
+          if (items.length > 0) {
+            const result = { source: items[0]?.source || 'Nitter', items };
+            this.cache.set(`nitter_${username}`, result);
+            return result;
+          }
         }
       } catch (e) {
         this.logger.debug(`Nitter ${instance} failed for @${username}`);
@@ -127,9 +147,14 @@ class Fetcher {
   }
 
   async fetchTweets(username) {
-    let data = await this.fetchSotwe(username);
-    if (data) return data;
-    return await this.fetchNitter(username);
+    try {
+      let data = await this.fetchSotwe(username);
+      if (data) return data;
+      return await this.fetchNitter(username);
+    } catch (error) {
+      this.logger.error(`Error fetching tweets for @${username}:`, error.message);
+      return null;
+    }
   }
 }
 
