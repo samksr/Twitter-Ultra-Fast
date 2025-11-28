@@ -37,8 +37,14 @@ async function main() {
       TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID
     };
     
+    // Init telegram FIRST with monitor placeholder
+    await TelegramClient.init(config, null);
+    
+    // Then create monitor so it can access telegram
     const monitor = new Monitor();
-    await TelegramClient.init(config, monitor);
+    
+    // Set monitor reference in telegram
+    TelegramClient.getInstance().monitor = monitor;
 
     const usersToMonitor = await Storage.loadUsers();
     const sentTweetsCount = (await Storage.loadSentIds()).size;
