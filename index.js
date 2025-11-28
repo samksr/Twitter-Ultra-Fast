@@ -13,23 +13,20 @@ const logger = Logger.getInstance();
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Rate limit middleware
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 100,
   message: 'Too many requests'
 });
 
 async function main() {
   try {
-    // Validate configuration
     const { valid, error } = await Storage.validateConfig();
     if (!valid) {
       logger.fatal(`Configuration validation failed: ${error}`);
       process.exit(1);
     }
 
-    // Initialize components
     logger.info('🚀 Initializing components...');
     SmartCache.init();
     Fetcher.init();
@@ -39,7 +36,9 @@ async function main() {
       TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
       TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID
     };
-    await TelegramClient.init(config);
+    
+    const monitor = new Monitor();
+    await TelegramClient.init(config, monitor);
 
     const usersToMonitor = await Storage.loadUsers();
     const sentTweetsCount = (await Storage.loadSentIds()).size;
@@ -48,17 +47,13 @@ async function main() {
     logger.info(`📊 Monitoring ${usersToMonitor.length} users`);
     logger.info(`📝 Tweet history: ${sentTweetsCount} tweets tracked`);
 
-    // Setup Express routes
     const metrics = Metrics.getInstance();
-    const monitor = new Monitor();
 
-    app.get('/health', limiter, metrics.health(usersToMonitor, monitor.lastCheckTime));
+    app.get('/health', limiter, metrics.health(usersToMonitor, monitor.getLastCheckTime()));
     app.get('/metrics', limiter, metrics.prometheus(usersToMonitor, sentTweetsCount));
 
-    // Start monitoring loop
     monitor.startMonitoringLoop(usersToMonitor);
 
-    // Graceful shutdown
     async function gracefulShutdown() {
       logger.info('🛑 Shutting down gracefully...');
       try {
@@ -78,7 +73,6 @@ async function main() {
     process.on('SIGTERM', gracefulShutdown);
     process.on('SIGINT', gracefulShutdown);
 
-    // Start health server
     app.listen(PORT, '0.0.0.0', () => {
       logger.info(`🏥 Health server running on http://0.0.0.0:${PORT}`);
       logger.info(`📊 Health endpoint: http://0.0.0.0:${PORT}/health`);
