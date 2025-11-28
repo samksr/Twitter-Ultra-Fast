@@ -8,9 +8,12 @@ class Monitor {
   constructor() {
     this.logger = Logger.getInstance();
     this.fetcher = Fetcher.getInstance();
-    this.telegram = TelegramClient.getInstance();
     this.cache = SmartCache.getInstance();
     this.lastCheckTime = null;
+  }
+
+  getTelegram() {
+    return TelegramClient.getInstance();
   }
 
   async checkFeeds(usersToMonitor, manual = false) {
@@ -21,7 +24,6 @@ class Monitor {
     const bootstrapState = await Storage.loadBootstrapState();
     let newCount = 0;
 
-    // Parallel fetch all users
     const results = await Promise.allSettled(
       usersToMonitor.map(user => this.fetcher.fetchTweets(user))
     );
@@ -44,10 +46,13 @@ class Monitor {
         if (isFirstRun) {
           sentTweetIds.add(tweet.id);
         } else {
-          await this.telegram.sendTweetAlert(user, tweet, result.value.source);
+          const telegram = this.getTelegram();
+          if (telegram) {
+            await telegram.sendTweetAlert(user, tweet, result.value.source);
+          }
           sentTweetIds.add(tweet.id);
           newCount++;
-          await new Promise(r => setTimeout(r, 500)); // Rate limit
+          await new Promise(r => setTimeout(r, 500));
         }
       }
 
@@ -57,14 +62,16 @@ class Monitor {
       }
     }
 
-    // Save state
     await Storage.saveSentIds(sentTweetIds);
     await Storage.saveBootstrapState(bootstrapState);
 
     if (manual) {
-      const stats = this.cache.getStats();
-      const msg = `✅ <b>Check Complete!</b>\n🔔 Found: ${newCount} new tweets\n💾 Cache: ${stats.hits}H/${stats.misses}M (${stats.size} items)`;
-      await this.telegram.bot.sendMessage(this.telegram.chatId, msg, { parse_mode: 'HTML' });
+      const telegram = this.getTelegram();
+      if (telegram) {
+        const stats = this.cache.getStats();
+        const msg = `✅ <b>Check Complete!</b>\n🔔 Found: ${newCount} new tweets\n💾 Cache: ${stats.hits}H/${stats.misses}M (${stats.size} items)`;
+        await telegram.bot.sendMessage(telegram.chatId, msg, { parse_mode: 'HTML' });
+      }
     }
 
     return newCount;
@@ -77,11 +84,10 @@ class Monitor {
       } catch (error) {
         this.logger.error('Monitor check error:', error);
       }
-      const interval = 45000 + Math.random() * 15000; // 45-60s with jitter
+      const interval = 45000 + Math.random() * 15000;
       setTimeout(runCheck, interval);
     };
 
-    // Initial delay
     setTimeout(runCheck, 5000);
     this.logger.info(`🔄 Monitoring loop started for ${usersToMonitor.length} users`);
   }
