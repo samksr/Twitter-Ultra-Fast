@@ -1,9 +1,6 @@
 const axios = require('axios');
 const Parser = require('rss-parser');
 const Logger = require('./logger');
-const axios = require('axios');
-const Parser = require('rss-parser');
-const Logger = require('./logger');
 const SmartCache = require('./cache');
 
 const NITTER_INSTANCES = [
