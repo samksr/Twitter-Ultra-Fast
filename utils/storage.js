@@ -17,7 +17,7 @@ class Storage {
       TELEGRAM_BOT_TOKEN: Joi.string().required(),
       TELEGRAM_CHAT_ID: Joi.string().required(),
       USERS_TO_MONITOR: Joi.string().optional()
-    });
+    }).unknown(true);
 
     const { error, value } = schema.validate(process.env);
     return { valid: !error, config: value, error: error?.message };
